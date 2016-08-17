@@ -50,17 +50,22 @@ public:
   ros::NodeHandle node_;
 
   // shared image message
-  sensor_msgs::Image img_;
-  image_transport::CameraPublisher image_pub_;
+  sensor_msgs::Image img_; // Holder for full image
+  sensor_msgs::Image left_img_;
+  sensor_msgs::Image right_img_;
+  image_transport::CameraPublisher left_image_pub_;
+  image_transport::CameraPublisher right_image_pub_;
+  boost::shared_ptr<camera_info_manager::CameraInfoManager> left_cinfo_;
+  boost::shared_ptr<camera_info_manager::CameraInfoManager> right_cinfo_;
 
   // parameters
-  std::string video_device_name_, io_method_name_, pixel_format_name_, camera_name_, camera_info_url_;
+  std::string video_device_name_, io_method_name_, pixel_format_name_, camera_name_,
+      left_camera_info_url_, right_camera_info_url_;
   //std::string start_service_name_, start_service_name_;
   bool streaming_status_;
   int image_width_, image_height_, framerate_, exposure_, brightness_, contrast_, saturation_, sharpness_, focus_,
       white_balance_, gain_;
   bool autofocus_, autoexposure_, auto_white_balance_;
-  boost::shared_ptr<camera_info_manager::CameraInfoManager> cinfo_;
 
   UsbCam cam_;
 
@@ -86,7 +91,8 @@ public:
   {
     // advertise the main image topic
     image_transport::ImageTransport it(node_);
-    image_pub_ = it.advertiseCamera("image_raw", 1);
+    left_image_pub_ = it.advertiseCamera("left/image_raw", 1);
+    right_image_pub_ = it.advertiseCamera("right/image_raw", 1);
 
     // grab the parameters
     node_.param("video_device", video_device_name_, std::string("/dev/video0"));
@@ -115,22 +121,26 @@ public:
     // load the camera info
     node_.param("camera_frame_id", img_.header.frame_id, std::string("head_camera"));
     node_.param("camera_name", camera_name_, std::string("head_camera"));
-    node_.param("camera_info_url", camera_info_url_, std::string(""));
-    cinfo_.reset(new camera_info_manager::CameraInfoManager(node_, camera_name_, camera_info_url_));
+    node_.param("left_camera_info_url", left_camera_info_url_, std::string(""));
+    left_cinfo_.reset(new camera_info_manager::CameraInfoManager(node_, "left_camera", left_camera_info_url_));
+    node_.param("right_camera_info_url", right_camera_info_url_, std::string(""));
+    right_cinfo_.reset(new camera_info_manager::CameraInfoManager(node_, "right_camera", right_camera_info_url_));
 
     // create Services
     service_start_ = node_.advertiseService("start_capture", &UsbCamNode::service_start_cap, this);
     service_stop_ = node_.advertiseService("stop_capture", &UsbCamNode::service_stop_cap, this);
 
     // check for default camera info
-    if (!cinfo_->isCalibrated())
+    if (!left_cinfo_->isCalibrated())
     {
-      cinfo_->setCameraName(video_device_name_);
+      left_cinfo_->setCameraName(video_device_name_);
+      right_cinfo_->setCameraName(video_device_name_);
       sensor_msgs::CameraInfo camera_info;
       camera_info.header.frame_id = img_.header.frame_id;
       camera_info.width = image_width_;
       camera_info.height = image_height_;
-      cinfo_->setCameraInfo(camera_info);
+      left_cinfo_->setCameraInfo(camera_info);
+      right_cinfo_->setCameraInfo(camera_info);
     }
 
 
@@ -219,6 +229,9 @@ public:
         cam_.set_v4l_parameter("focus_absolute", focus_);
       }
     }
+
+    left_img_.data.resize((image_width_ / 2) * image_height_ * 3);
+    right_img_.data.resize((image_width_ / 2) * image_height_ * 3);
   }
 
   virtual ~UsbCamNode()
@@ -232,12 +245,47 @@ public:
     cam_.grab_image(&img_);
 
     // grab the camera info
-    sensor_msgs::CameraInfoPtr ci(new sensor_msgs::CameraInfo(cinfo_->getCameraInfo()));
-    ci->header.frame_id = img_.header.frame_id;
-    ci->header.stamp = img_.header.stamp;
+    /// LEFT IMAGE ///
+    sensor_msgs::CameraInfoPtr cil(new sensor_msgs::CameraInfo(left_cinfo_->getCameraInfo()));
+    cil->header.frame_id = img_.header.frame_id;
+    cil->header.stamp = img_.header.stamp;
+
+    left_img_.header = img_.header;
+    left_img_.height = img_.height;
+    left_img_.width = img_.width / 2;
+    left_img_.step = img_.step / 2;
+    left_img_.encoding = img_.encoding;
+
+    // Copy the data from the img to the left img
+    for (int i = 0; i < img_.height; ++i)
+    {
+      memcpy(&(left_img_.data[i * left_img_.step]), &(img_.data[i * img_.step]), left_img_.step);
+    }
 
     // publish the image
-    image_pub_.publish(img_, *ci);
+    left_image_pub_.publish(left_img_, *cil);
+
+    /// RIGHT IMAGE ///
+    sensor_msgs::CameraInfoPtr cir(new sensor_msgs::CameraInfo(right_cinfo_->getCameraInfo()));
+    cil->header.frame_id = img_.header.frame_id;
+    cil->header.stamp = img_.header.stamp;
+
+    right_img_.header = img_.header;
+    right_img_.height = img_.height;
+    right_img_.width = img_.width / 2;
+    right_img_.step = img_.step / 2;
+    right_img_.encoding = img_.encoding;
+
+    // Copy the data from the img to the left img
+    for (int i = 0; i < img_.height; ++i)
+    {
+      memcpy(&(right_img_.data[i * right_img_.step]),
+          &(img_.data[(i * img_.step) + (img_.step / 2)]),
+          right_img_.step);
+    }
+
+    // publish the image
+    right_image_pub_.publish(right_img_, *cir);
 
     return true;
   }

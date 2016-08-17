@@ -1,0 +1,13 @@
+<launch>
+  <node launch-prefix="xterm -e gdb --args" name="usb_cam" pkg="usb_cam" type="usb_cam_node" output="screen" >
+    <param name="video_device" value="/dev/video0" />
+    <param name="image_width" value="1344" />
+    <param name="image_height" value="376" />
+    <param name="pixel_format" value="yuyv" />
+    <param name="camera_frame_id" value="usb_cam" />
+    <param name="io_method" value="mmap"/>
+    <param name="framerate" value="100"/>
+    <param name="left_camera_info_url" value="package://usb_cam/params/left_camera_calibration_vga.yaml"/>
+    <param name="right_camera_info_url" value="package://usb_cam/params/right_camera_calibration_vga.yaml"/>
+  </node>
+</launch>
