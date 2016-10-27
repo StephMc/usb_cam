@@ -53,14 +53,14 @@ public:
   sensor_msgs::Image img_; // Holder for full image
   sensor_msgs::Image left_img_;
   sensor_msgs::Image right_img_;
-  image_transport::CameraPublisher left_image_pub_;
+  image_transport::CameraPublisher image_pub_;
   image_transport::CameraPublisher right_image_pub_;
-  boost::shared_ptr<camera_info_manager::CameraInfoManager> left_cinfo_;
+  boost::shared_ptr<camera_info_manager::CameraInfoManager> cinfo_;
   boost::shared_ptr<camera_info_manager::CameraInfoManager> right_cinfo_;
 
   // parameters
   std::string video_device_name_, io_method_name_, pixel_format_name_, camera_name_,
-      left_camera_info_url_, right_camera_info_url_;
+      camera_info_url_, right_camera_info_url_, camera_type_;
   //std::string start_service_name_, start_service_name_;
   bool streaming_status_;
   int image_width_, image_height_, framerate_, exposure_, brightness_, contrast_, saturation_, sharpness_, focus_,
@@ -89,10 +89,25 @@ public:
   UsbCamNode() :
       node_("~")
   {
+    // Controls mono or stereo image output
+    node_.param("camera_type", camera_type_, std::string("mono"));
+    if (camera_type_ != "mono" && camera_type_ != "stereo")
+    {
+      ROS_ERROR("Invalid camera type set, defaulting to mono camera");
+      camera_type_ = "mono";
+    }
+
     // advertise the main image topic
     image_transport::ImageTransport it(node_);
-    left_image_pub_ = it.advertiseCamera("left/image_raw", 1);
-    right_image_pub_ = it.advertiseCamera("right/image_raw", 1);
+    if (camera_type_ == "mono")
+    {
+      image_pub_ = it.advertiseCamera("image_raw", 1);
+    }
+    else
+    {
+      image_pub_ = it.advertiseCamera("left/image_raw", 1);
+      right_image_pub_ = it.advertiseCamera("right/image_raw", 1);
+    }
 
     // grab the parameters
     node_.param("video_device", video_device_name_, std::string("/dev/video0"));
@@ -118,29 +133,46 @@ public:
     node_.param("auto_white_balance", auto_white_balance_, true);
     node_.param("white_balance", white_balance_, 4000);
 
-    // load the camera info
     node_.param("camera_frame_id", img_.header.frame_id, std::string("head_camera"));
     node_.param("camera_name", camera_name_, std::string("head_camera"));
-    node_.param("left_camera_info_url", left_camera_info_url_, std::string(""));
-    left_cinfo_.reset(new camera_info_manager::CameraInfoManager(node_, "left_camera", left_camera_info_url_));
-    node_.param("right_camera_info_url", right_camera_info_url_, std::string(""));
-    right_cinfo_.reset(new camera_info_manager::CameraInfoManager(node_, "right_camera", right_camera_info_url_));
+    node_.param("camera_info_url", camera_info_url_, std::string(""));
+
+    // load the camera info
+    if (camera_type_ == "mono")
+    {
+      cinfo_.reset(new camera_info_manager::CameraInfoManager(node_, "camera", camera_info_url_));
+    }
+    else
+    {
+      // For stereo, the left camera uses the 'camera' namespace whilst the right camera use the 'right_camera" namespace
+      ros::NodeHandle nhcl("~/left");
+      ros::NodeHandle nhcr("~/right");
+      cinfo_.reset(new camera_info_manager::CameraInfoManager(nhcl, "left_camera", camera_info_url_));
+      node_.param("right_camera_info_url", right_camera_info_url_, std::string(""));
+      right_cinfo_.reset(new camera_info_manager::CameraInfoManager(nhcr, "right_camera", right_camera_info_url_));
+    }
 
     // create Services
     service_start_ = node_.advertiseService("start_capture", &UsbCamNode::service_start_cap, this);
     service_stop_ = node_.advertiseService("stop_capture", &UsbCamNode::service_stop_cap, this);
 
     // check for default camera info
-    if (!left_cinfo_->isCalibrated())
+    if (!cinfo_->isCalibrated())
     {
-      left_cinfo_->setCameraName(video_device_name_);
-      right_cinfo_->setCameraName(video_device_name_);
+      ROS_WARN("Camera not calibrated");
+      cinfo_->setCameraName(video_device_name_);
       sensor_msgs::CameraInfo camera_info;
       camera_info.header.frame_id = img_.header.frame_id;
       camera_info.width = image_width_;
       camera_info.height = image_height_;
-      left_cinfo_->setCameraInfo(camera_info);
-      right_cinfo_->setCameraInfo(camera_info);
+      cinfo_->setCameraInfo(camera_info);
+
+      if (camera_type_ == "stereo")
+      {
+        cinfo_->setCameraName("left_" + video_device_name_);
+        right_cinfo_->setCameraName("right_" + video_device_name_);
+        right_cinfo_->setCameraInfo(camera_info);
+      }
     }
 
 
@@ -230,8 +262,12 @@ public:
       }
     }
 
-    left_img_.data.resize((image_width_ / 2) * image_height_ * 3);
-    right_img_.data.resize((image_width_ / 2) * image_height_ * 3);
+    if (camera_type_ == "stereo")
+    {
+      // Prepare the image buffers to hold half the raw image received 
+      left_img_.data.resize((image_width_ / 2) * image_height_ * 3);
+      right_img_.data.resize((image_width_ / 2) * image_height_ * 3);
+    }
   }
 
   virtual ~UsbCamNode()
@@ -244,11 +280,18 @@ public:
     // grab the image
     cam_.grab_image(&img_);
 
-    // grab the camera info
-    /// LEFT IMAGE ///
-    sensor_msgs::CameraInfoPtr cil(new sensor_msgs::CameraInfo(left_cinfo_->getCameraInfo()));
-    cil->header.frame_id = img_.header.frame_id;
-    cil->header.stamp = img_.header.stamp;
+    // grab the camera info for single or left image
+    sensor_msgs::CameraInfoPtr ci(new sensor_msgs::CameraInfo(cinfo_->getCameraInfo()));
+    ci->header.frame_id = img_.header.frame_id;
+    ci->header.stamp = img_.header.stamp;
+
+    if (camera_type_ == "mono")
+    {
+      image_pub_.publish(img_, *ci);
+      return true;
+    }
+
+    /// Handle copying the data to split the stereo frames ///
 
     left_img_.header = img_.header;
     left_img_.height = img_.height;
@@ -263,12 +306,12 @@ public:
     }
 
     // publish the image
-    left_image_pub_.publish(left_img_, *cil);
+    image_pub_.publish(left_img_, *ci);
 
     /// RIGHT IMAGE ///
     sensor_msgs::CameraInfoPtr cir(new sensor_msgs::CameraInfo(right_cinfo_->getCameraInfo()));
-    cil->header.frame_id = img_.header.frame_id;
-    cil->header.stamp = img_.header.stamp;
+    cir->header.frame_id = img_.header.frame_id;
+    cir->header.stamp = img_.header.stamp;
 
     right_img_.header = img_.header;
     right_img_.height = img_.height;
