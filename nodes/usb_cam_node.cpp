@@ -65,6 +65,7 @@ public:
   bool streaming_status_;
   int image_width_, image_height_, framerate_, exposure_, brightness_, contrast_, saturation_, sharpness_, focus_,
       white_balance_, gain_;
+  int sample_rate_; // Set if you want grab frames slower than the set camera framerate, helps reduce cpu usage
   bool autofocus_, autoexposure_, auto_white_balance_;
 
   UsbCam cam_;
@@ -120,6 +121,7 @@ public:
     node_.param("image_width", image_width_, 640);
     node_.param("image_height", image_height_, 480);
     node_.param("framerate", framerate_, 30);
+    node_.param("sample_rate", sample_rate_, framerate_);
     // possible values: yuyv, uyvy, mjpeg, yuvmono10, rgb24
     node_.param("pixel_format", pixel_format_name_, std::string("mjpeg"));
     // enable/disable autofocus
@@ -335,7 +337,7 @@ public:
 
   bool spin()
   {
-    ros::Rate loop_rate(this->framerate_);
+    ros::Rate loop_rate(this->sample_rate_);
     while (node_.ok())
     {
       if (cam_.is_capturing()) {
