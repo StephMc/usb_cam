@@ -1187,7 +1187,14 @@ void UsbCam::set_v4l_parameter(const std::string& param, const std::string& valu
 {
   // build the command
   std::stringstream ss;
-  ss << "v4l2-ctl --device=" << camera_dev_ << " -c " << param << "=" << value << " 2>&1";
+  if (param == "exposure_absolute")
+  {
+    ss << "uvcdynctrl -s \"Exposure, Auto\" 2" << " 2>&1";
+  }
+  else
+  {
+    ss << "v4l2-ctl --device=" << camera_dev_ << " -c " << param << "=" << value << " 2>&1";
+  }
   std::string cmd = ss.str();
 
   // capture the output
