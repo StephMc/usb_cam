@@ -40,6 +40,7 @@
 #include <camera_info_manager/camera_info_manager.h>
 #include <sstream>
 #include <std_srvs/Empty.h>
+#include <yaml-cpp/yaml.h>
 
 namespace usb_cam {
 
@@ -60,7 +61,7 @@ public:
 
   // parameters
   std::string video_device_name_, io_method_name_, pixel_format_name_, camera_name_,
-      camera_info_url_, right_camera_info_url_, camera_type_;
+      camera_info_url_, right_camera_info_url_, camera_type_, camera_match_url_;
   //std::string start_service_name_, start_service_name_;
   bool streaming_status_;
   int image_width_, image_height_, framerate_, exposure_, brightness_, contrast_, saturation_, sharpness_, focus_,
@@ -138,6 +139,59 @@ public:
     node_.param("camera_frame_id", img_.header.frame_id, std::string("head_camera"));
     node_.param("camera_name", camera_name_, std::string("head_camera"));
     node_.param("camera_info_url", camera_info_url_, std::string(""));
+    node_.param("right_camera_info_url", right_camera_info_url_, std::string(""));
+    node_.param("camera_match_url", camera_match_url_, std::string(""));
+
+	if (camera_match_url_ != "")
+	{
+		ROS_INFO_STREAM("Opening file " << camera_match_url_);
+		YAML::Node config = YAML::LoadFile(camera_match_url_);
+		std::string hostname, serial;
+
+		std::stringstream ss;
+		ss << "hostname" << " 2>&1";
+		std::string cmd = ss.str();
+
+		int buffer_size = 256;
+		char buffer[buffer_size];
+		FILE *stream = popen(cmd.c_str(), "r");
+		if (stream)
+		{
+			while (!feof(stream))
+			{
+				if (fgets(buffer, buffer_size, stream) != NULL)
+				{
+					hostname.append(buffer);
+				}
+			}
+			pclose(stream);
+			// any output should be an error
+			if (hostname.length() > 0)
+			{
+				// remove the new line
+				hostname.resize(hostname.size() - 1);
+				ROS_WARN("Got hostname: %s", hostname.c_str());
+			}
+		}
+		else
+		{
+			ROS_WARN("Could not get hostname");
+		}
+
+		if (config["nucf550"])
+		{
+			serial = config["nucf550"].as<std::string>();
+			ROS_INFO_STREAM("Using camera " << serial << " for machine " << hostname);
+			camera_info_url_ =  camera_info_url_ + serial + ".yaml";
+			right_camera_info_url_ = right_camera_info_url_ + serial + ".yaml";
+			ROS_INFO_STREAM("Camera cal files are " << camera_info_url_ << " and " << right_camera_info_url_);
+		}
+		else
+		{
+			ROS_ERROR_STREAM("Cannot find the serial number of the camera for this machine (" <<
+					hostname << ")");
+		}
+	}
 
     // load the camera info
     if (camera_type_ == "mono")
@@ -150,7 +204,6 @@ public:
       ros::NodeHandle nhcl("~/left");
       ros::NodeHandle nhcr("~/right");
       cinfo_.reset(new camera_info_manager::CameraInfoManager(nhcl, "left_camera", camera_info_url_));
-      node_.param("right_camera_info_url", right_camera_info_url_, std::string(""));
       right_cinfo_.reset(new camera_info_manager::CameraInfoManager(nhcr, "right_camera", right_camera_info_url_));
     }
 

@@ -9,7 +9,8 @@
     <param name="io_method" value="mmap"/>
     <param name="framerate" value="100"/>
     <param name="sample_rate" value="50"/>
-    <param name="left_camera_info_url" value="package://usb_cam/params/left_camera_calibration_vga.yaml"/>
-    <param name="right_camera_info_url" value="package://usb_cam/params/right_camera_calibration_vga.yaml"/>
+    <param name="camera_info_url" value="package://usb_cam/params/zed/left_camera_calibration_"/>
+    <param name="right_camera_info_url" value="package://usb_cam/params/zed/right_camera_calibration_"/>
+    <param name="camera_match_url" value="$(find usb_cam)/params/camera_match.yaml"/>
   </node>
 </launch>
