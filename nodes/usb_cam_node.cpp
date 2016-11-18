@@ -178,9 +178,9 @@ public:
 			ROS_WARN("Could not get hostname");
 		}
 
-		if (config["nucf550"])
+		if (config[hostname])
 		{
-			serial = config["nucf550"].as<std::string>();
+			serial = config[hostname].as<std::string>();
 			ROS_INFO_STREAM("Using camera " << serial << " for machine " << hostname);
 			camera_info_url_ =  camera_info_url_ + serial + ".yaml";
 			right_camera_info_url_ = right_camera_info_url_ + serial + ".yaml";
